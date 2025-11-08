@@ -79,59 +79,115 @@
                         const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
                         const store = tx.objectStore(STORE_NAME);
                         const key = `${collectionPath}::${docId}`;
-                        const req = store.delete(key);
-                        req.onsuccess = () => res();
-                        req.onerror = (e) => rej(e);
+                        const delReq = store.delete(key);
+                        delReq.onsuccess = () => res();
+                        delReq.onerror = (e) => rej(e);
                     });
                 });
             }
 
-            function clearStore() {
-                return openIndexedDB().then(() => {
-                    return new Promise((res, rej) => {
-                        const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
-                        const store = tx.objectStore(STORE_NAME);
-                        const req = store.clear();
-                        req.onsuccess = () => res();
-                        req.onerror = (e) => rej(e);
-                    });
+            function notifyListeners(collectionPath) {
+                const arr = listeners[collectionPath] || [];
+                const snapshot = makeSnapshot(collectionPath);
+                arr.forEach(cb => {
+                    try { cb(snapshot); } catch(e){ console.error(e); }
                 });
             }
 
-            function onSnapshot(collectionPath, callback) {
-                // Registra o listener
-                if (!listeners[collectionPath]) {
-                    listeners[collectionPath] = [];
-                }
-                listeners[collectionPath].push(callback);
-
-                // Chama o callback imediatamente com os dados atuais
-                if (memory[collectionPath]) {
-                    callback(Object.values(memory[collectionPath]));
-                }
-
-                // Retorna uma função para desregistrar o listener
-                return () => {
-                    listeners[collectionPath] = listeners[collectionPath].filter(cb => cb !== callback);
+            function makeSnapshot(collectionPath) {
+                const docsObj = memory[collectionPath] || {};
+                const docsArray = Object.values(docsObj).map(d => {
+                    return {
+                        id: d.id,
+                        data: () => ({ ...d })
+                    };
+                });
+                return {
+                    forEach: (fn) => docsArray.forEach(fn),
+                    docs: docsArray
                 };
             }
 
-            function emitChange(collectionPath) {
-                // Chama todos os listeners registrados para esta coleção
-                if (listeners[collectionPath]) {
-                    const data = Object.values(memory[collectionPath] || {});
-                    listeners[collectionPath].forEach(callback => callback(data));
-                }
-            }
-
-            // --- API pública ---
-            window.kanbanDB = {
-                persistEntry,
-                removeEntry,
-                clearStore,
-                onSnapshot,
-                emitChange
+            // API compatível
+            const standalone = {
+                initializeApp: (config) => ({ config }),
+                getAuth: (app) => {
+                    const authObj = { _user: null, _onChange: [] };
+                    return authObj;
+                },
+                signInAnonymously: async (auth) => {
+                    auth._user = { uid: `local-${Math.random().toString(36).slice(2,10)}` };
+                    // chama listeners se houver
+                    (auth._onChange || []).forEach(cb => cb(auth._user));
+                    return auth._user;
+                },
+                signInWithCustomToken: async (auth, token) => {
+                    auth._user = { uid: `local-${Math.random().toString(36).slice(2,10)}`, token };
+                    (auth._onChange || []).forEach(cb => cb(auth._user));
+                    return auth._user;
+                },
+                onAuthStateChanged: (auth, cb) => {
+                    auth._onChange = auth._onChange || [];
+                    auth._onChange.push(cb);
+                    // chama imediatamente com o estado atual (pode ser null)
+                    setTimeout(() => cb(auth._user), 0);
+                    return () => { auth._onChange = auth._onChange.filter(x => x !== cb); };
+                },
+                getFirestore: (app) => ({ _app: app }),
+                collection: (db, collectionPath) => collectionPath,
+                doc: (db, collectionPath, id) => ({ collectionPath, id }),
+                getDoc: async (docRef) => {
+                    await openIndexedDB();
+                    const col = memory[docRef.collectionPath] || {};
+                    const value = col[docRef.id];
+                    return {
+                        exists: () => !!value,
+                        data: () => value ? { ...value } : undefined
+                    };
+                },
+                setDoc: async (docRef, data) => {
+                    await openIndexedDB();
+                    memory[docRef.collectionPath] = memory[docRef.collectionPath] || {};
+                    memory[docRef.collectionPath][docRef.id] = { ...data };
+                    await persistEntry(docRef.collectionPath, docRef.id, memory[docRef.collectionPath][docRef.id]);
+                    notifyListeners(docRef.collectionPath);
+                },
+                updateDoc: async (docRef, update) => {
+                    await openIndexedDB();
+                    memory[docRef.collectionPath] = memory[docRef.collectionPath] || {};
+                    const prev = memory[docRef.collectionPath][docRef.id] || {};
+                    memory[docRef.collectionPath][docRef.id] = { ...prev, ...update, id: docRef.id };
+                    await persistEntry(docRef.collectionPath, docRef.id, memory[docRef.collectionPath][docRef.id]);
+                    notifyListeners(docRef.collectionPath);
+                },
+                deleteDoc: async (docRef) => {
+                    await openIndexedDB();
+                    if (memory[docRef.collectionPath]) {
+                        delete memory[docRef.collectionPath][docRef.id];
+                    }
+                    await removeEntry(docRef.collectionPath, docRef.id);
+                    notifyListeners(docRef.collectionPath);
+                },
+                onSnapshot: (collectionRef, cb, onError) => {
+                    // garante DB carregado, então registra listener e chama imediatamente
+                    openIndexedDB().then(() => {
+                        listeners[collectionRef] = listeners[collectionRef] || [];
+                        listeners[collectionRef].push(cb);
+                        try { cb(makeSnapshot(collectionRef)); } catch(e) { if (onError) onError(e); }
+                    }).catch(e => { if (onError) onError(e); });
+                    // retorna função de unsubscribe
+                    return () => {
+                        listeners[collectionRef] = (listeners[collectionRef] || []).filter(f => f !== cb);
+                    };
+                },
+                setLogLevel: () => {}
             };
+
+            // expõe a API no window para o script principal usar
+            window.firebaseSDK = standalone;
+
+            // abre DB imediato para carregar memória e permitir inspeção via console
+            openIndexedDB().catch(e => console.warn('IndexedDB init failed', e));
         })();
     </script>
 
