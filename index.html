@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quadro Kanban</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="app-container">
+        <h1>Quadro Kanban</h1>
+
+        <div class="add-task-container">
+            <input type="text" id="task-input" placeholder="Nova tarefa...">
+            <button id="add-task-btn">Adicionar Tarefa</button>
+        </div>
+
+        <div class="kanban-board">
+            <div class="kanban-column" id="todo" ondragover="event.preventDefault()" ondrop="drop(event)">
+                <h2>A Fazer</h2>
+                <div class="tasks-container" id="todo-tasks"></div>
+            </div>
+            <div class="kanban-column" id="inprogress" ondragover="event.preventDefault()" ondrop="drop(event)">
+                <h2>Em Progresso</h2>
+                <div class="tasks-container" id="inprogress-tasks"></div>
+            </div>
+            <div class="kanban-column" id="done" ondragover="event.preventDefault()" ondrop="drop(event)">
+                <h2>Concluído</h2>
+                <div class="tasks-container" id="done-tasks"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="firebase-config.js"></script>
+    <script type="module" src="index.js"></script>
+</body>
+</html>
