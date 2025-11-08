@@ -608,7 +608,8 @@
                 try {
                     if (editingId) {
                         // --- Modo Edição (Update) ---
-                        const taskRef = doc(db, tasksCollectionRef.path, editingId);
+                        const collPath = (tasksCollectionRef && tasksCollectionRef.path) || tasksCollectionRef;
+                        const taskRef = doc(db, collPath, editingId);
                         await updateDoc(taskRef, {
                             text: text,
                             priority: priority
@@ -620,14 +621,25 @@
                             modalErrorMessage.textContent = 'O Nº da OS/SM é obrigatório.';
                             return;
                         }
-                        // Verifica se o ID já existe
-                        const docRef = doc(db, tasksCollectionRef.path, id);
-                        const docSnap = await getDoc(docRef); // Esta linha causava o erro
-                        if (docSnap.exists()) {
-                             modalErrorMessage.textContent = 'Este número de OS/SM já existe.';
-                             return;
+                        // Verifica se o ID já existe — primeiro usa cache local (rápido), depois tenta getDoc com timeout (seguro)
+                        if (state.tasks[id]) {
+                            modalErrorMessage.textContent = 'Este número de OS/SM já existe.';
+                            return;
                         }
-                        
+                        const collPath = (tasksCollectionRef && tasksCollectionRef.path) || tasksCollectionRef;
+                        const docRef = doc(db, collPath, id);
+                        try {
+                            // evita esperar indefinidamente se getDoc travar no adapter — timeout de 800ms
+                            const docPromise = getDoc(docRef);
+                            const docSnap = await Promise.race([docPromise, new Promise(res => setTimeout(() => res(null), 800))]);
+                            if (docSnap && typeof docSnap.exists === 'function' && docSnap.exists()) {
+                                modalErrorMessage.textContent = 'Este número de OS/SM já existe.';
+                                return;
+                            }
+                        } catch (err) {
+                            console.warn('getDoc falhou ou timeout; prosseguindo com criação:', err);
+                        }
+                         
                         const newTask = {
                             id: id,
                             text: text,
@@ -635,14 +647,14 @@
                             column: 'col-restaurar'
                         };
                         await setDoc(docRef, newTask);
-                    }
-                    // Não precisamos mais chamar saveState() ou renderBoard()
-                    // O onSnapshot vai detetar a mudança e re-renderizar
-                    closeTaskModal();
-                } catch (error) {
-                    console.error("Erro ao salvar OS:", error);
-                    modalErrorMessage.textContent = "Erro ao salvar no banco de dados.";
-                }
+                     }
+                     // Não precisamos mais chamar saveState() ou renderBoard()
+                     // O onSnapshot vai detetar a mudança e re-renderizar
+                     closeTaskModal();
+                 } catch (error) {
+                     console.error("Erro ao salvar OS:", error);
+                     modalErrorMessage.textContent = "Erro ao salvar no banco de dados.";
+                 }
             };
 
             // DELETAR OS
