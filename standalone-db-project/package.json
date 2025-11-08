@@ -1,0 +1,33 @@
+{
+  "name": "standalone-db-project",
+  "version": "1.0.0",
+  "description": "Projeto de banco de dados independente com TypeScript",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "init-db": "bash scripts/init-db.sh"
+  },
+  "dependencies": {
+    "pg": "^8.7.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^16.11.7"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/standalone-db-project.git"
+  },
+  "keywords": [
+    "database",
+    "typescript",
+    "nodejs"
+  ],
+  "author": "Seu Nome",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/yourusername/standalone-db-project/issues"
+  },
+  "homepage": "https://github.com/yourusername/standalone-db-project#readme"
+}

@@ -1,0 +1,19 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "username": "your_username",
+    "password": "your_password",
+    "database": "your_database_name"
+  },
+  "logging": {
+    "level": "info",
+    "enabled": true
+  },
+  "migrations": {
+    "directory": "src/db/migrations"
+  },
+  "seeds": {
+    "directory": "src/db/seeds"
+  }
+}
