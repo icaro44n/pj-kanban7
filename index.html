@@ -16,16 +16,123 @@
     <!-- NOVO: SDKs do Firebase -->
     <!-- Adicionamos os scripts do Firebase como módulos -->
     <script type="module">
-        // Importa os serviços que vamos usar
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        // Disponibiliza as funções do Firebase para o nosso script principal
-        window.firebaseSDK = {
-            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-            getFirestore, collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, setLogLevel
-        };
+        // Implementação independente usando IndexedDB (API compatível com o que o index.html espera)
+        (function(){
+            const DB_NAME = 'kanban_local_db_v1';
+            const STORE_NAME = 'kanban_kv'; // armazena entradas no formato key = collectionPath::docId
+            let dbInstance = null;
+            const listeners = {}; // { collectionPath: [cb, ...] }
+            const memory = {}; // { collectionPath: { docId: docData, ... }, ... }
+
+            function openIndexedDB() {
+                return new Promise((resolve, reject) => {
+                    if (dbInstance) return resolve(dbInstance);
+                    const req = indexedDB.open(DB_NAME, 1);
+                    req.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains(STORE_NAME)) {
+                            db.createObjectStore(STORE_NAME, { keyPath: 'key' });
+                        }
+                    };
+                    req.onsuccess = (e) => {
+                        dbInstance = e.target.result;
+                        // carregar para memória
+                        const tx = dbInstance.transaction(STORE_NAME, 'readonly');
+                        const store = tx.objectStore(STORE_NAME);
+                        const all = store.getAll();
+                        all.onsuccess = () => {
+                            memoryClear();
+                            (all.result || []).forEach(item => {
+                                const [collectionPath, docId] = item.key.split('::');
+                                memory[collectionPath] = memory[collectionPath] || {};
+                                memory[collectionPath][docId] = item.value;
+                            });
+                            resolve(dbInstance);
+                        };
+                        all.onerror = (err) => resolve(dbInstance); // mesmo se falhar, resolve
+                    };
+                    req.onerror = (err) => reject(err);
+                });
+            }
+
+            function memoryClear() {
+                for (const k in memory) delete memory[k];
+            }
+
+            function persistEntry(collectionPath, docId, value) {
+                return openIndexedDB().then(() => {
+                    return new Promise((res, rej) => {
+                        const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
+                        const store = tx.objectStore(STORE_NAME);
+                        const key = `${collectionPath}::${docId}`;
+                        const record = { key, value };
+                        const putReq = store.put(record);
+                        putReq.onsuccess = () => res();
+                        putReq.onerror = (e) => rej(e);
+                    });
+                });
+            }
+
+            function removeEntry(collectionPath, docId) {
+                return openIndexedDB().then(() => {
+                    return new Promise((res, rej) => {
+                        const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
+                        const store = tx.objectStore(STORE_NAME);
+                        const key = `${collectionPath}::${docId}`;
+                        const req = store.delete(key);
+                        req.onsuccess = () => res();
+                        req.onerror = (e) => rej(e);
+                    });
+                });
+            }
+
+            function clearStore() {
+                return openIndexedDB().then(() => {
+                    return new Promise((res, rej) => {
+                        const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
+                        const store = tx.objectStore(STORE_NAME);
+                        const req = store.clear();
+                        req.onsuccess = () => res();
+                        req.onerror = (e) => rej(e);
+                    });
+                });
+            }
+
+            function onSnapshot(collectionPath, callback) {
+                // Registra o listener
+                if (!listeners[collectionPath]) {
+                    listeners[collectionPath] = [];
+                }
+                listeners[collectionPath].push(callback);
+
+                // Chama o callback imediatamente com os dados atuais
+                if (memory[collectionPath]) {
+                    callback(Object.values(memory[collectionPath]));
+                }
+
+                // Retorna uma função para desregistrar o listener
+                return () => {
+                    listeners[collectionPath] = listeners[collectionPath].filter(cb => cb !== callback);
+                };
+            }
+
+            function emitChange(collectionPath) {
+                // Chama todos os listeners registrados para esta coleção
+                if (listeners[collectionPath]) {
+                    const data = Object.values(memory[collectionPath] || {});
+                    listeners[collectionPath].forEach(callback => callback(data));
+                }
+            }
+
+            // --- API pública ---
+            window.kanbanDB = {
+                persistEntry,
+                removeEntry,
+                clearStore,
+                onSnapshot,
+                emitChange
+            };
+        })();
     </script>
 
     <style>
